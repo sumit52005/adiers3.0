@@ -1,0 +1,9 @@
+import React from 'react';
+
+export default function Sidebar({items,activeTab,onTabChange,header}){
+  return <aside style={{width:228,flexShrink:0}} className="ops-sidebar flex flex-col min-h-full border-r" >
+    {header&&<div className="sidebar-header px-5 py-5 border-b" style={{borderColor:'var(--border)'}}><div className="eyebrow">{header.label}</div><div className="font-semibold text-sm mt-1 truncate">{header.name}</div><div className="flex items-center gap-2 mt-3"><span className="w-1.5 h-1.5 rounded-full dot-available" style={{background:'var(--safe)'}}/><span className="text-[9px] mono" style={{color:'var(--safe)'}}>OPERATOR ONLINE</span></div></div>}
+    <nav className="flex-1 py-3">{items.map(item=><button key={item.key} onClick={()=>onTabChange(item.key)} className={`sidebar-item ${activeTab===item.key?'active':''} w-full flex items-center gap-3 px-4 py-3 text-left transition-all`} style={{borderLeft:activeTab===item.key?'3px solid var(--blue)':'3px solid transparent',color:activeTab===item.key?'var(--text)':'var(--muted)'}}><span className="text-base">{item.icon}</span><span className="sidebar-label font-medium text-xs tracking-wide">{item.label}</span>{item.badge&&<span className="sidebar-label ml-auto text-[9px] px-2 py-0.5 rounded-full font-bold" style={{background:'rgba(255,45,45,.15)',color:'#ff6b6b'}}>{item.badge}</span>}</button>)}</nav>
+    <div className="system-status m-3 p-3 rounded-lg" style={{background:'rgba(0,0,0,.2)',border:'1px solid var(--border)'}}><div className="eyebrow mb-3">System status</div>{['Database connected','AI engine active','Map services online'].map(x=><div key={x} className="flex items-center gap-2 text-[9px] mono mb-2" style={{color:'#8190ae'}}><span className="w-1.5 h-1.5 rounded-full dot-available" style={{background:'var(--safe)'}}/>{x.toUpperCase()}</div>)}</div>
+  </aside>;
+}

@@ -1,0 +1,98 @@
+.outer-container {
+  display: flex;
+  min-height: 100%;
+  flex: 1 1 0%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.step-circle-container {
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+  max-width: 30rem;
+  border-radius: 1.5rem;
+  box-shadow: 0 20px 25px -5px rgba(0,0,0,.4), 0 10px 10px -5px rgba(0,0,0,.3);
+  background: linear-gradient(145deg, rgba(16,25,46,.96), rgba(10,16,32,.92));
+  border: 1px solid rgba(82,39,255,.25) !important;
+}
+
+.step-indicator-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  padding: 1.75rem 2rem 1.25rem;
+}
+
+.step-content-default { position: relative; overflow: hidden; }
+.step-default { padding: 0.5rem 2rem 0.25rem; }
+
+.footer-container { padding: 0 2rem 1.75rem; }
+.footer-nav { margin-top: 1.75rem; display: flex; }
+.footer-nav.spread { justify-content: space-between; }
+.footer-nav.end { justify-content: flex-end; }
+
+.back-button {
+  transition: all 250ms;
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.875rem;
+  color: #8291b2;
+  background: transparent;
+  border: 1px solid rgba(129,160,218,.2);
+  font-size: 13px;
+  font-weight: 500;
+}
+.back-button:hover { color: #f2f6ff; border-color: rgba(129,160,218,.45); }
+.back-button.inactive { pointer-events: none; opacity: 0.4; }
+
+.next-button {
+  transition: all 250ms;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #5227FF, #7c4fff);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  padding: 0.5rem 1.25rem;
+  border: none;
+  box-shadow: 0 6px 18px rgba(82,39,255,.35);
+}
+.next-button:hover { box-shadow: 0 8px 24px rgba(82,39,255,.5); filter: brightness(1.1); }
+.next-button:active { transform: scale(.97); }
+
+.step-indicator { position: relative; cursor: pointer; outline: none; }
+.step-indicator-inner {
+  display: flex;
+  height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+
+.active-dot {
+  height: 0.7rem;
+  width: 0.7rem;
+  border-radius: 9999px;
+  background-color: #fff;
+}
+.step-number { font-size: 0.8rem; font-family: 'JetBrains Mono', monospace; }
+
+.step-connector {
+  position: relative;
+  margin-left: 0.4rem;
+  margin-right: 0.4rem;
+  height: 0.125rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 0.25rem;
+  background-color: rgba(129,160,218,.2);
+}
+.step-connector-inner { position: absolute; left: 0; top: 0; height: 100%; }
+.check-icon { height: 0.9rem; width: 0.9rem; color: #fff; }
