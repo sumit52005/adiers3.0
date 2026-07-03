@@ -1,8 +1,14 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Bell, ChevronDown, LogOut, ShieldCheck, Zap, X, Check, CheckCheck } from 'lucide-react';
-import { requestNotificationPermission } from './Notification';
+
+// Inlined to avoid circular import with Notification.js
+async function askNotifPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission !== 'default') return Notification.permission;
+  return await Notification.requestPermission();
+}
 
 // ─── Static ticker incidents (decorative scroll) ──────────────────────────────
 const TICKER = [
@@ -106,7 +112,7 @@ function NotifBell() {
   };
 
   const requestPerm = async () => {
-    const perm = await requestNotificationPermission();
+    const perm = await askNotifPermission();
     setPermState(perm);
   };
 

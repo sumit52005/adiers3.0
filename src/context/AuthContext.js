@@ -9,18 +9,19 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Restore Supabase session
+  // Restore Supabase session on mount
   useEffect(() => {
-    setUser({
-      id: "c5ddb91f-cc06-414a-9a5c-c6b47054a55d",
-      name: "om rajale",
-      email: "sushmay73397@gmail.com",
-      role: "authority",
-      phone: "7972692252",
-    });
-    setToken("mock-token");
-    setLoading(false);
+    db.getSession()
+      .then(result => {
+        if (result) {
+          setUser(result.user);
+          setToken(result.token);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
+
 
   // Login
   const login = useCallback(async (email, password) => {
