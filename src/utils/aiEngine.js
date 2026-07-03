@@ -43,7 +43,23 @@ export function haversine(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-// ─── Smart Dispatch ──────────────────────────────────────────────────────────
+// ─── Accurate ETA calculation ────────────────────────────────────────────────
+// Uses distance-based speed model:
+//   < 3 km  → urban congestion  : 20 km/h (heavy traffic, narrow roads)
+//   3–8 km  → city driving      : 35 km/h
+//   > 8 km  → arterial/highway  : 55 km/h
+// Plus 2-min dispatch prep time
+
+export function calculateETA(distKm) {
+  let speedKmh;
+  if (distKm < 3) speedKmh = 20;
+  else if (distKm < 8) speedKmh = 35;
+  else speedKmh = 55;
+  const travelMin = (distKm / speedKmh) * 60;
+  return Math.max(2, Math.round(travelMin + 2)); // +2 min prep time
+}
+
+// ─── Team type preference map ─────────────────────────────────────────────────
 
 const TYPE_MAP = {
   'Flood':             'Flood',
@@ -54,18 +70,54 @@ const TYPE_MAP = {
   'Unknown':           'Multi',
 };
 
-export function dispatchTeam(category, lat, lng, teams) {
-  const needed  = TYPE_MAP[category] || 'Multi';
-  let pool      = teams.filter(t => t.status === 'Available' && t.type === needed);
-  if (!pool.length) pool = teams.filter(t => t.status === 'Available');
-  if (!pool.length) return { team: null, eta: 0 };
+// ─── Full team ranking with distance + ETA ───────────────────────────────────
+// Returns all teams ranked by composite score.
+// Each entry: { team, distKm, eta, score, typeMatch }
 
-  const nearest = pool.reduce((a, b) =>
-    haversine(lat, lng, a.lat, a.lng) < haversine(lat, lng, b.lat, b.lng) ? a : b
-  );
-  const dist   = haversine(lat, lng, nearest.lat, nearest.lng);
-  const eta    = Math.max(3, Math.round(dist * 5));
-  return { team: nearest, eta };
+export function rankTeams(category, lat, lng, teams) {
+  if (!teams || teams.length === 0) return [];
+  const needed = TYPE_MAP[category] || 'Multi';
+
+  return teams
+    .filter(t => t.lat && t.lng) // only teams with known location
+    .map(team => {
+      const distKm    = haversine(lat, lng, team.lat, team.lng);
+      const eta       = calculateETA(distKm);
+      const typeMatch = team.type === needed;
+      const available = team.status === 'Available';
+
+      // Composite score — lower is better
+      // +0 for exact type match, +6 min penalty for wrong type
+      // +0 if available, +15 min penalty if busy/on-route (might become free)
+      const typePenalty  = typeMatch ? 0 : 6;
+      const statusPenalty = available ? 0 : 15;
+      const score = eta + typePenalty + statusPenalty;
+
+      return { team, distKm: Math.round(distKm * 10) / 10, eta, score, typeMatch, available };
+    })
+    .sort((a, b) => a.score - b.score);
+}
+
+// ─── Smart Dispatch — picks the best team ────────────────────────────────────
+
+export function dispatchTeam(category, lat, lng, teams) {
+  const needed = TYPE_MAP[category] || 'Multi';
+
+  // Prefer available teams matching the type, then any available, then any
+  let pool = teams.filter(t => t.lat && t.lng && t.status === 'Available' && t.type === needed);
+  if (!pool.length) pool = teams.filter(t => t.lat && t.lng && t.status === 'Available');
+  if (!pool.length) pool = teams.filter(t => t.lat && t.lng); // fallback: any team
+  if (!pool.length) return { team: null, eta: 0, distKm: 0 };
+
+  // Pick nearest by haversine
+  const ranked = pool.map(team => {
+    const distKm = haversine(lat, lng, team.lat, team.lng);
+    const eta    = calculateETA(distKm);
+    return { team, distKm, eta };
+  }).sort((a, b) => a.distKm - b.distKm);
+
+  const best = ranked[0];
+  return { team: best.team, eta: best.eta, distKm: Math.round(best.distKm * 10) / 10 };
 }
 
 // ─── Color helpers ───────────────────────────────────────────────────────────

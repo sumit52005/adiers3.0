@@ -261,6 +261,29 @@ export const db = {
 
   },
 
+  async updateTeamLocation(teamId, lat, lng) {
+    const { error } = await supabase
+      .from('rescue_teams')
+      .update({ lat, lng })
+      .eq('id', teamId);
+    if (error) throw new Error(error.message);
+    return true;
+  },
+
+  // Find a rescue team whose name matches the logged-in user's profile name
+  async getTeamByName(name) {
+    const { data, error } = await supabase
+      .from('rescue_teams')
+      .select('*')
+      .ilike('name', `%${(name || '').split(' ')[0]}%`)
+      .limit(5);
+    if (error) throw new Error(error.message);
+    return (data || []).map(t => ({
+      id: t.id, name: t.name, type: t.type,
+      lat: t.lat, lng: t.lng, status: t.status, members: t.members,
+    }));
+  },
+
   async getTeamMembers(teamId) {
     const { data, error } = await supabase
       .from('team_members')
@@ -271,6 +294,7 @@ export const db = {
       id: m.id, name: m.name, grade: m.grade, status: m.status,
     }));
   },
+
 
   // ─── USERS ─────────────────────────────────────────────────────────────────
 

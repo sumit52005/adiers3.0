@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../utils/db';
-import { dispatchTeam } from '../../utils/aiEngine';
+import { dispatchTeam, rankTeams } from '../../utils/aiEngine';
 import { notify } from '../../components/Notification';
 import Sidebar from '../../components/Sidebar';
 import KpiCard from '../../components/KpiCard';
@@ -298,11 +298,12 @@ function Dispatch() {
   const runDispatch = async () => {
     const inc = incidents.find(i=>i.id===parseInt(selInc));
     if(!inc) return;
-    const { team, eta } = dispatchTeam(inc.category, inc.lat, inc.lng, teams);
+    const { team, eta, distKm } = dispatchTeam(inc.category, inc.lat, inc.lng, teams);
     if(!team){ setResult({ error:'No available teams for this incident type.' }); return; }
+    const ranked = rankTeams(inc.category, inc.lat, inc.lng, teams);
     await db.updateTeamStatus(team.id,'On Route');
-    setResult({ team, eta, inc });
-    notify(`${team.name} dispatched → ETA ${eta} min`, 'success');
+    setResult({ team, eta, distKm, inc, ranked });
+    notify(`${team.name} dispatched → ${distKm}km · ETA ${eta} min`, 'success');
     refresh();
   };
 
@@ -324,11 +325,50 @@ function Dispatch() {
             ⚡ Run Smart Dispatch
           </button>
           {result && (
-            <div className="mt-4 rounded-xl px-4 py-3 text-xs"
-                 style={result.error
-                   ? { background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', color:'#FCA5A5' }
-                   : { background:'rgba(34,197,94,.1)',  border:'1px solid rgba(34,197,94,.3)',  color:'#86EFAC' }}>
-              {result.error || `✅ ${result.team.name} dispatched → ETA ${result.eta} min`}
+            <div className="mt-4 text-xs">
+              {result.error ? (
+                <div className="rounded-xl px-4 py-3"
+                  style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', color:'#FCA5A5' }}>
+                  {result.error}
+                </div>
+              ) : (
+                <div>
+                  <div className="rounded-xl px-4 py-3 mb-3"
+                    style={{ background:'rgba(34,197,94,.1)', border:'1px solid rgba(34,197,94,.3)', color:'#86EFAC' }}>
+                    ✅ <strong>{result.team.name}</strong> dispatched →{' '}
+                    <strong>{result.distKm} km</strong> ·{' '}
+                    ETA <strong>{result.eta} min</strong>
+                  </div>
+                  {result.ranked && result.ranked.length > 0 && (
+                    <div style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
+                      <div style={{ padding:'8px 12px', borderBottom:'1px solid var(--border)', fontFamily:'JetBrains Mono', fontSize:9, letterSpacing:'.1em', color:'var(--muted)' }}>
+                        FULL TEAM RANKING FOR THIS INCIDENT
+                      </div>
+                      {result.ranked.map((r, idx) => (
+                        <div key={r.team.id}
+                          style={{
+                            padding:'8px 12px', display:'flex', alignItems:'center', gap:10,
+                            borderBottom:'1px solid rgba(255,255,255,.04)',
+                            background: r.team.id === result.team.id ? 'rgba(34,197,94,.06)' : 'transparent',
+                          }}>
+                          <span style={{ width:18, fontFamily:'JetBrains Mono', fontWeight:700, color: idx===0 ? '#86EFAC':'var(--muted)' }}>#{idx+1}</span>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontWeight:600, color: r.team.id===result.team.id ? '#86EFAC':'var(--text)' }}>
+                              {r.team.name}
+                              {r.team.id===result.team.id && <span style={{ marginLeft:6, fontSize:9, background:'rgba(34,197,94,.2)', padding:'1px 5px', borderRadius:4 }}>DISPATCHED</span>}
+                            </div>
+                            <div style={{ color:'var(--muted)', marginTop:2 }}>{r.team.type} · {r.team.status} · {r.typeMatch ? 'Type ✓' : 'Type mismatch'}</div>
+                          </div>
+                          <div style={{ textAlign:'right' }}>
+                            <div style={{ fontFamily:'JetBrains Mono', color:'var(--blue)' }}>{r.distKm} km</div>
+                            <div style={{ color:'var(--orange)' }}>~{r.eta} min</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
