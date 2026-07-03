@@ -11,9 +11,10 @@
  * and ensures the AI dispatch model picks the closest real team.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { db } from '../../utils/db';
-import { notify } from '../Notification';
-import { haversine } from '../../utils/aiEngine';
+import { db } from '../utils/db';
+import { notify } from './Notification';
+import { haversine } from '../utils/aiEngine';
+
 
 // ─── Status states ────────────────────────────────────────────────────────────
 const S = {
