@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../utils/db';
 import { classifyIncident, assignPriority, dispatchTeam } from '../../utils/aiEngine';
@@ -160,26 +160,102 @@ function Overview({ user, setTab }) {
 
 // ── Report Form ───────────────────────────────────────────────────────────────
 function ReportForm({ user, onSuccess }) {
-  const [form, setForm]         = useState({ title: '', desc: '', category: '', location: 'Pune, Maharashtra (18.5204, 73.8567)' });
+  const [form, setForm]         = useState({ title: '', desc: '', category: '', location: '', lat: 18.5204, lng: 73.8567 });
   const [ai, setAi]             = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [teams, setTeams]       = useState([]);
+  const [loadingGPS, setLoadingGPS] = useState(false);
+  const [isLocationUserEdited, setIsLocationUserEdited] = useState(false);
 
   useEffect(() => {
     db.getTeams().then(setTeams).catch(console.error);
   }, []);
 
-  const setF = (k, v) => {
-    setForm(f => ({ ...f, [k]: v }));
-    if (k === 'title' || k === 'desc') {
-      const combined = (k === 'title' ? v : form.title) + ' ' + (k === 'desc' ? v : form.desc);
-      if (combined.trim().length > 5) {
-        const cat = classifyIncident(combined);
-        const pri = assignPriority(combined);
-        const { team } = dispatchTeam(cat, 18.5204, 73.8567, teams);
-        setAi({ cat, pri, team });
-      } else setAi(null);
+  const updateAiDispatch = (currentForm, currentTeams) => {
+    const combined = (currentForm.title || '') + ' ' + (currentForm.desc || '');
+    if (combined.trim().length > 5) {
+      const cat = classifyIncident(combined);
+      const pri = assignPriority(combined);
+      const { team } = dispatchTeam(cat, currentForm.lat || 18.5204, currentForm.lng || 73.8567, currentTeams);
+      setAi({ cat, pri, team });
+    } else {
+      setAi(null);
     }
+  };
+
+  const detectGPS = useCallback((isAuto = false) => {
+    if (!navigator.geolocation) {
+      if (!isAuto) notify('Geolocation is not supported by your browser.', 'warning');
+      return;
+    }
+    if (isAuto && isLocationUserEdited) return;
+
+    setLoadingGPS(true);
+    if (!isAuto) notify('Detecting GPS location...', 'info');
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, {
+            headers: { 'Accept-Language': 'en' }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const address = data.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+            setForm(f => {
+              const nextLocation = isLocationUserEdited ? f.location : address;
+              const nextForm = { ...f, location: nextLocation, lat: latitude, lng: longitude };
+              updateAiDispatch(nextForm, teams);
+              return nextForm;
+            });
+            notify('Location detected successfully!', 'success');
+          } else {
+            throw new Error();
+          }
+        } catch {
+          setForm(f => {
+            const nextLocation = isLocationUserEdited ? f.location : `Detected Location (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+            const nextForm = { ...f, location: nextLocation, lat: latitude, lng: longitude };
+            updateAiDispatch(nextForm, teams);
+            return nextForm;
+          });
+          notify('GPS coordinates set.', 'info');
+        } finally {
+          setLoadingGPS(false);
+        }
+      },
+      (error) => {
+        setLoadingGPS(false);
+        if (!isAuto) {
+          let msg = 'Failed to retrieve GPS location.';
+          if (error.code === error.PERMISSION_DENIED) {
+            msg = 'GPS permission denied. Please allow location access or type manually.';
+          }
+          notify(msg, 'warning');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, [isLocationUserEdited, teams]);
+
+  useEffect(() => {
+    if (teams.length > 0) {
+      detectGPS(true);
+    }
+  }, [teams, detectGPS]);
+
+  const setF = (k, v) => {
+    if (k === 'location') {
+      setIsLocationUserEdited(true);
+    }
+    setForm(f => {
+      const updated = { ...f, [k]: v };
+      if (k === 'title' || k === 'desc') {
+        updateAiDispatch(updated, teams);
+      }
+      return updated;
+    });
   };
 
   const handleSubmit = async () => {
@@ -188,7 +264,8 @@ function ReportForm({ user, onSuccess }) {
     try {
       const { incident, category, priority, team, eta } = await db.createIncident({
         title: form.title, description: form.desc,
-        location: form.location, lat: 18.5204, lng: 73.8567, userId: user.id,
+        location: form.location || `Coordinates (${form.lat.toFixed(5)}, ${form.lng.toFixed(5)})`,
+        lat: form.lat, lng: form.lng, userId: user.id,
       });
       notify(`Report #${incident.id} submitted! AI classified as ${category} (${priority})`, 'success');
       notify(team ? `${team.name} dispatched — ETA ${eta} min` : 'No teams available right now', team ? 'info' : 'warning');
@@ -225,9 +302,50 @@ function ReportForm({ user, onSuccess }) {
           </select>
         </div>
         <div>
-          <label className="eyebrow block mb-2">Location</label>
-          <input value={form.location} onChange={e => setF('location', e.target.value)}
-            className="w-full rounded-xl px-4 py-3 text-sm outline-none" style={INPUT} />
+          <div className="flex justify-between items-center mb-2">
+            <label className="eyebrow block mb-0">Location</label>
+            <button
+              type="button"
+              onClick={() => detectGPS(false)}
+              disabled={loadingGPS}
+              className="text-xs px-2 py-0.5 rounded transition duration-200"
+              style={{
+                background: loadingGPS ? 'rgba(53,199,255,.05)' : 'rgba(53,199,255,.15)',
+                color: 'var(--blue)',
+                border: '1px solid rgba(53,199,255,.35)',
+                fontFamily: 'JetBrains Mono',
+                fontWeight: 600,
+                fontSize: 9,
+                letterSpacing: '.05em',
+                cursor: loadingGPS ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {loadingGPS ? '🔄 LOCATING...' : '📍 AUTO-DETECT'}
+            </button>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <input value={form.location} onChange={e => setF('location', e.target.value)}
+              placeholder="Detecting location..."
+              className="w-full rounded-xl px-4 py-3 text-sm outline-none" style={{ ...INPUT, paddingRight: '4rem' }} />
+            {form.lat && form.lng && (
+              <span
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold"
+                style={{
+                  color: 'var(--blue)',
+                  fontFamily: 'JetBrains Mono',
+                  fontSize: 10,
+                  pointerEvents: 'none',
+                  background: 'rgba(53,199,255,.1)',
+                  padding: '2px 5px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(53,199,255,.2)'
+                }}
+                title={`Coordinates: ${form.lat.toFixed(5)}, ${form.lng.toFixed(5)}`}
+              >
+                GPS
+              </span>
+            )}
+          </div>
         </div>
       </div>
       <div className="mb-5">

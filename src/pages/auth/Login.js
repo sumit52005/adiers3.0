@@ -26,7 +26,7 @@ function Field({ label, type = 'text', value, onChange, placeholder, suffix }) {
       <label className="eyebrow block mb-2">{label}</label>
       <div style={{ position: 'relative' }}>
         <input type={type} value={value} onChange={onChange}
-          placeholder={placeholder} style={INPUT_STYLE} />
+          placeholder={placeholder} style={{ ...INPUT_STYLE, paddingRight: suffix ? '5.5rem' : '14px' }} />
         {suffix && <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>{suffix}</div>}
       </div>
     </div>
@@ -127,7 +127,51 @@ function SignUpStepper({ onSwitch }) {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [loadingGPS, setLoadingGPS] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const detectGPS = () => {
+    if (!navigator.geolocation) {
+      notify('Geolocation is not supported by your browser.', 'warning');
+      return;
+    }
+    setLoadingGPS(true);
+    notify('Detecting location...', 'info');
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, {
+            headers: { 'Accept-Language': 'en' }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const addr = data.address;
+            const cityArea = addr ? (addr.city || addr.town || addr.suburb || addr.village || addr.city_district || addr.county || addr.state) : '';
+            const address = cityArea || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+            set('location', address);
+            notify('Location detected successfully!', 'success');
+          } else {
+            throw new Error();
+          }
+        } catch {
+          set('location', `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+          notify('Location set to coordinates.', 'info');
+        } finally {
+          setLoadingGPS(false);
+        }
+      },
+      (error) => {
+        setLoadingGPS(false);
+        let msg = 'Failed to retrieve GPS location.';
+        if (error.code === error.PERMISSION_DENIED) {
+          msg = 'GPS permission denied. Please allow location access or type manually.';
+        }
+        notify(msg, 'warning');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
 
   const handleComplete = async () => {
     setError('');
@@ -227,7 +271,33 @@ function SignUpStepper({ onSwitch }) {
           </h2>
           <p style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 16 }}>Help us tailor your experience</p>
           <Field label="Phone Number" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 9876543210" />
-          {role === 'citizen' && <Field label="Your City / Area" value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. Pune, Maharashtra" />}
+          {role === 'citizen' && (
+            <Field
+              label="Your City / Area"
+              value={form.location}
+              onChange={e => set('location', e.target.value)}
+              placeholder="e.g. Pune, Maharashtra"
+              suffix={
+                <button
+                  type="button"
+                  onClick={detectGPS}
+                  disabled={loadingGPS}
+                  style={{
+                    background: 'rgba(53,199,255,.15)',
+                    border: '1px solid rgba(53,199,255,.3)',
+                    color: 'var(--blue)',
+                    fontSize: '11px',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    cursor: loadingGPS ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {loadingGPS ? '⏳...' : '📍 GPS'}
+                </button>
+              }
+            />
+          )}
           {role === 'rescue_team' && <Field label="Team / Station ID" value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. PUNE-FIRE-A1" />}
           {role === 'authority' && <Field label="Department / Office" value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. NDMA Pune District" />}
         </Step>
