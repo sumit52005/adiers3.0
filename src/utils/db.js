@@ -236,10 +236,33 @@ export const db = {
           .eq('name', inc.assigned_team);
       }
     }
+  },
+
+  // Directly assign an incident to a rescue team (used by auto-dispatch engine)
+  async assignIncidentToTeam(incidentId, teamId, teamName, eta) {
+    // 1. Update the incident row
+    const { error: incErr } = await supabase
+      .from('incidents')
+      .update({
+        assigned_team: teamName,
+        status: 'Assigned',
+        eta: eta || 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', incidentId);
+    if (incErr) throw new Error(incErr.message);
+
+    // 2. Mark team as On Route
+    const { error: teamErr } = await supabase
+      .from('rescue_teams')
+      .update({ status: 'On Route' })
+      .eq('id', teamId);
+    if (teamErr) throw new Error(teamErr.message);
+
     return true;
   },
 
-  // ─── TEAMS ─────────────────────────────────────────────────────────────────
+
 
   async getTeams() {
 

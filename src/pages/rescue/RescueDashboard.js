@@ -9,11 +9,13 @@ import DisasterHeatmap from '../../components/maps/DisasterHeatmap';
 import WeatherHeatmap from '../../components/maps/WeatherHeatmap';
 import LiveTrackingMap from '../../components/maps/LiveTrackingMap';
 import TeamBaseTracker from '../../components/TeamBaseTracker';
+import AutoDispatchEngine from '../../components/AutoDispatchEngine';
 import { supabase, isSupabaseReady } from '../../utils/supabase';
 import { haversine, calculateETA, rankTeams } from '../../utils/aiEngine';
 
 const SIDEBAR = [
   { key: 'overview',  icon: '🏠', label: 'Team Dashboard' },
+  { key: 'ai_engine', icon: '🤖', label: 'AI Engine'       },
   { key: 'assigned',  icon: '📌', label: 'Assigned Cases' },
   { key: 'tracking',  icon: '📍', label: 'Live Tracking'  },
   { key: 'disaster',  icon: '🗺️', label: 'Disaster Map'   },
@@ -69,7 +71,9 @@ function Overview({ user, setTab, myTeam, setMyTeam }) {
       {/* ── Base location tracker ── */}
       <TeamBaseTracker user={user} onTeamResolved={setMyTeam} />
 
-      {/* ── KPI strip ── */}
+      {/* ── AI Auto-Dispatch Engine ── */}
+      <AutoDispatchEngine team={myTeam} />
+
       <div className="grid grid-cols-4 gap-4 mb-5">
         <KpiCard label="Active Missions"  value={assigned.length}
                  color="var(--orange)" icon="🚒" />
@@ -398,6 +402,25 @@ export default function RescueDashboard() {
       <Sidebar items={SIDEBAR} activeTab={tab} onTabChange={setTab}
         header={{ label: 'Rescue Portal', name: user?.name }} />
       <main className="flex-1 overflow-y-auto p-6">
+        {tab === 'ai_engine' && (
+          <div>
+            <h2 style={{ fontFamily: 'Rajdhani', fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
+              🤖 AI Auto-Dispatch Engine
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 18 }}>
+              Continuously monitors unassigned incidents · Analyses severity · Auto-assigns if no authority response within the countdown window
+            </p>
+            {!myTeam?.lat && (
+              <div style={{
+                background: 'rgba(255,107,26,.08)', border: '1px solid rgba(255,107,26,.25)',
+                borderRadius: 10, padding: '10px 16px', marginBottom: 14, fontSize: 12, color: 'var(--orange)',
+              }}>
+                ⚠️ Set your base GPS location on the <strong>Team Dashboard</strong> first — the engine needs your position to calculate proximity.
+              </div>
+            )}
+            <AutoDispatchEngine team={myTeam} />
+          </div>
+        )}
         {tab === 'overview'  && <Overview user={user} setTab={setTab} myTeam={myTeam} setMyTeam={setMyTeam} />}
         {tab === 'assigned'  && <AssignedCases myTeam={myTeam} />}
         {tab === 'tracking'  && (
