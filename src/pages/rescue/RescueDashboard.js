@@ -1,17 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../utils/db';
 import { notify } from '../../components/Notification';
 import Sidebar from '../../components/Sidebar';
 import KpiCard from '../../components/KpiCard';
-import { PriorityBadge, StatusBadge, CategoryBadge } from '../../components/Badge';
+import { PriorityBadge } from '../../components/Badge';
 import DisasterHeatmap from '../../components/maps/DisasterHeatmap';
 import WeatherHeatmap from '../../components/maps/WeatherHeatmap';
 import LiveTrackingMap from '../../components/maps/LiveTrackingMap';
 import TeamBaseTracker from '../../components/TeamBaseTracker';
 import AutoDispatchEngine from '../../components/AutoDispatchEngine';
 import { supabase, isSupabaseReady } from '../../utils/supabase';
-import { haversine, calculateETA, rankTeams } from '../../utils/aiEngine';
+import { haversine, calculateETA } from '../../utils/aiEngine';
 
 const SIDEBAR = [
   { key: 'overview',  icon: '🏠', label: 'Team Dashboard' },
@@ -27,12 +27,10 @@ const SIDEBAR = [
 // ─── Overview ─────────────────────────────────────────────────────────────────
 function Overview({ user, setTab, myTeam, setMyTeam }) {
   const [incidents, setIncidents] = useState([]);
-  const [teams, setTeams]         = useState([]);
   const [notifs, setNotifs]       = useState([]);
 
   useEffect(() => {
     db.getIncidents().then(setIncidents).catch(() => {});
-    db.getTeams().then(setTeams).catch(() => {});
     db.getNotifications(user?.id).then(setNotifs).catch(() => {});
   }, [user?.id]);
 
@@ -328,7 +326,22 @@ function AssignedCases({ myTeam }) {
 function TeamStatus({ user, myTeam }) {
   const [current, setCurrent] = useState('On Route');
   const [members, setMembers] = useState([]);
+  const [teamName, setTeamName] = useState('');
+  const [savingName, setSavingName] = useState(false);
   useEffect(() => { db.getTeamMembers(1).then(setMembers).catch(() => {}); }, []);
+  useEffect(() => { if (myTeam?.name) setTeamName(myTeam.name); }, [myTeam?.name]);
+
+  const handleSaveName = async () => {
+    if (!myTeam?.id || !teamName.trim()) return;
+    setSavingName(true);
+    try {
+      await db.updateTeamName(myTeam.id, teamName.trim());
+      notify(`✅ Team name updated to "${teamName.trim()}"`, 'success');
+    } catch (e) {
+      notify(`Failed to update name: ${e.message}`, 'error');
+    }
+    setSavingName(false);
+  };
 
   const STATUSES = ['Available', 'Busy', 'On Route', 'Emergency Mode'];
   return (
@@ -364,6 +377,41 @@ function TeamStatus({ user, myTeam }) {
           Team: <strong>{myTeam?.name || '—'}</strong> · Status: <strong>{current}</strong>
         </div>
       </div>
+
+      {/* ── Update Team Name ── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        className="rounded-xl p-5 mb-4">
+        <h3 className="font-semibold text-sm mb-3">✏️ Update Team Name</h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            value={teamName}
+            onChange={e => setTeamName(e.target.value)}
+            placeholder="Enter new team name…"
+            style={{
+              flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)',
+              color: 'var(--text)', borderRadius: 8, padding: '8px 12px',
+              fontSize: 12, outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleSaveName}
+            disabled={savingName || !teamName.trim() || teamName.trim() === myTeam?.name}
+            style={{
+              background: savingName ? 'rgba(255,255,255,.04)' : 'rgba(53,199,255,.15)',
+              border: '1px solid rgba(53,199,255,.35)',
+              color: savingName ? 'var(--muted)' : 'var(--blue)',
+              borderRadius: 8, padding: '8px 14px', fontSize: 11, fontWeight: 700,
+              cursor: savingName ? 'not-allowed' : 'pointer', fontFamily: 'JetBrains Mono',
+            }}
+          >
+            {savingName ? '⏳ SAVING…' : '💾 SAVE'}
+          </button>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6, fontFamily: 'JetBrains Mono' }}>
+          Current name: <strong style={{ color: 'var(--text)' }}>{myTeam?.name || '—'}</strong>
+        </div>
+      </div>
+
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         className="rounded-xl p-5">
         <h3 className="font-semibold text-sm mb-4">Team Members ({members.length || 6})</h3>

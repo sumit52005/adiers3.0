@@ -13,7 +13,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '../utils/db';
 import { notify } from './Notification';
-import { haversine } from '../utils/aiEngine';
+import GPSPickerMap from './maps/GPSPickerMap';
+import { getAccurateCoords, reverseGeocode, clearGPSCache } from '../utils/gps';
 
 
 // ─── Status states ────────────────────────────────────────────────────────────
@@ -62,70 +63,72 @@ export default function TeamBaseTracker({ user, onTeamResolved }) {
       return;
     }
 
-    if (!navigator.geolocation) {
-      setStatus(S.GPS_DENIED);
-      setError('Geolocation is not supported by your browser.');
-      return;
-    }
-
     setStatus(S.GETTING_GPS);
     setError('');
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        setCoords({ lat: latitude, lng: longitude, accuracy: Math.round(accuracy) });
-        setStatus(S.SAVING);
+    const coords = await getAccurateCoords();
+    if (coords.method === 'default') {
+      notify('Could not retrieve GPS. Defaulted to Pune. Please drag the pin to your exact base location.', 'warning');
+    }
 
-        // Reverse geocode
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
-            { headers: { 'Accept-Language': 'en' } }
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const addr = data.address;
-            const short = addr.suburb || addr.village || addr.neighbourhood ||
-                          addr.town || addr.city || data.display_name || 'Unknown area';
-            setAddress(short);
-          }
-        } catch (_) {}
+    setCoords({ lat: coords.lat, lng: coords.lng, accuracy: coords.accuracy });
+    setStatus(S.SAVING);
 
-        // Save to Supabase
-        try {
-          await db.updateTeamLocation(activeTeam.id, latitude, longitude);
-          setStatus(S.SUCCESS);
-          setTeam(prev => ({ ...prev, lat: latitude, lng: longitude }));
-          if (onTeamResolved) onTeamResolved({ ...activeTeam, lat: latitude, lng: longitude });
-          notify(`📍 ${activeTeam.name} base location set successfully`, 'success');
-        } catch (err) {
-          // RLS might block direct update — store locally and show advisory
-          setStatus(S.SUCCESS); // still useful for local dispatch
-          setTeam(prev => ({ ...prev, lat: latitude, lng: longitude }));
-          if (onTeamResolved) onTeamResolved({ ...activeTeam, lat: latitude, lng: longitude });
-          notify(`📍 Location captured (DB update requires admin permissions)`, 'info');
-        }
-      },
-      (err) => {
-        if (err.code === 1) {
-          setStatus(S.GPS_DENIED);
-          setError('Location access denied. Please allow GPS in your browser and try again.');
-        } else {
-          setStatus(S.ERROR);
-          setError('Could not get GPS fix. Check your device location settings.');
-        }
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-    );
+    const res = await reverseGeocode(coords.lat, coords.lng);
+    setAddress(res.address);
+
+    // Save to Supabase
+    try {
+      await db.updateTeamLocation(activeTeam.id, coords.lat, coords.lng);
+      setStatus(S.SUCCESS);
+      setTeam(prev => ({ ...prev, lat: coords.lat, lng: coords.lng }));
+      if (onTeamResolved) onTeamResolved({ ...activeTeam, lat: coords.lat, lng: coords.lng });
+      notify(`📍 ${activeTeam.name} base location set successfully`, 'success');
+    } catch (err) {
+      // RLS might block direct update — store locally and show advisory
+      setStatus(S.SUCCESS); // still useful for local dispatch
+      setTeam(prev => ({ ...prev, lat: coords.lat, lng: coords.lng }));
+      if (onTeamResolved) onTeamResolved({ ...activeTeam, lat: coords.lat, lng: coords.lng });
+      notify(`📍 Location captured (DB update requires admin permissions)`, 'info');
+    }
+
+    // Persist to localStorage so page refresh doesn't re-ask
+    try {
+      localStorage.setItem('aedirs_team_gps', JSON.stringify({
+        teamId: activeTeam.id,
+        lat: coords.lat,
+        lng: coords.lng,
+        address: res.address,
+        savedAt: Date.now(),
+      }));
+    } catch (_) {}
   }, [team, onTeamResolved]);
 
   // ── Auto-capture on first load if team is matched ─────────────────────────
   useEffect(() => {
-    if (team && status === S.IDLE) {
-      const t = setTimeout(() => captureAndSave(team), 800);
-      return () => clearTimeout(t);
-    }
+    if (!team || status !== S.IDLE) return;
+
+    // Try restoring from localStorage first (avoids re-asking on refresh)
+    try {
+      const cached = localStorage.getItem('aedirs_team_gps');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        // Only restore if the cached entry matches this team and is < 24 hours old
+        const age = Date.now() - (parsed.savedAt || 0);
+        if (parsed.teamId === team.id && age < 24 * 60 * 60 * 1000) {
+          setCoords({ lat: parsed.lat, lng: parsed.lng, accuracy: null });
+          setAddress(parsed.address || '');
+          setStatus(S.SUCCESS);
+          setTeam(prev => ({ ...prev, lat: parsed.lat, lng: parsed.lng }));
+          if (onTeamResolved) onTeamResolved({ ...team, lat: parsed.lat, lng: parsed.lng });
+          return; // skip GPS capture entirely
+        }
+      }
+    } catch (_) {}
+
+    // No valid cache — run full GPS capture
+    const t = setTimeout(() => captureAndSave(team), 800);
+    return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [team]);
 
@@ -199,28 +202,59 @@ export default function TeamBaseTracker({ user, onTeamResolved }) {
       )}
 
       {coords && status === S.SUCCESS && (
-        <div style={{
-          background: 'rgba(37,230,163,.07)', border: '1px solid rgba(37,230,163,.2)',
-          borderRadius: 8, padding: '10px 14px', marginBottom: 12,
-          display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <span style={{ fontSize: 22 }}>📍</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
-              {address || 'Location detected'}
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'JetBrains Mono' }}>
-              {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
-              {coords.accuracy && ` · ±${coords.accuracy}m accuracy`}
-            </div>
-          </div>
+        <>
           <div style={{
-            fontSize: 10, fontFamily: 'JetBrains Mono', color: '#25e6a3',
-            background: 'rgba(37,230,163,.12)', padding: '4px 8px', borderRadius: 6,
+            background: 'rgba(37,230,163,.07)', border: '1px solid rgba(37,230,163,.2)',
+            borderRadius: 8, padding: '10px 14px', marginBottom: 12,
+            display: 'flex', alignItems: 'center', gap: 12,
           }}>
-            LIVE BASE
+            <span style={{ fontSize: 22 }}>📍</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
+                {address || 'Location detected'}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'JetBrains Mono' }}>
+                {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+                {coords.accuracy && ` · ±${coords.accuracy}m accuracy`}
+              </div>
+            </div>
+            <div style={{
+              fontSize: 10, fontFamily: 'JetBrains Mono', color: '#25e6a3',
+              background: 'rgba(37,230,163,.12)', padding: '4px 8px', borderRadius: 6,
+            }}>
+              LIVE BASE
+            </div>
           </div>
-        </div>
+          <div style={{ marginBottom: 12 }}>
+            <GPSPickerMap
+              lat={coords.lat}
+              lng={coords.lng}
+              onChange={async (newLat, newLng, newAddr) => {
+                setCoords({ lat: newLat, lng: newLng, accuracy: 5 });
+                setAddress(newAddr);
+                const activeTeam = team;
+                if (activeTeam) {
+                  try {
+                    await db.updateTeamLocation(activeTeam.id, newLat, newLng);
+                    if (onTeamResolved) onTeamResolved({ ...activeTeam, lat: newLat, lng: newLng });
+                  } catch (_) {
+                    if (onTeamResolved) onTeamResolved({ ...activeTeam, lat: newLat, lng: newLng });
+                  }
+                  // Update cached coordinates in localStorage
+                  try {
+                    localStorage.setItem('aedirs_team_gps', JSON.stringify({
+                      teamId: activeTeam.id,
+                      lat: newLat,
+                      lng: newLng,
+                      address: newAddr,
+                      savedAt: Date.now(),
+                    }));
+                  } catch (_) {}
+                }
+              }}
+            />
+          </div>
+        </>
       )}
 
       {/* Error */}
@@ -264,25 +298,47 @@ export default function TeamBaseTracker({ user, onTeamResolved }) {
         </div>
       )}
 
-      {/* Retry / Refresh button */}
-      <button
-        onClick={() => captureAndSave()}
-        disabled={[S.GETTING_GPS, S.SAVING].includes(status)}
-        style={{
-          width: '100%', padding: '8px', borderRadius: 8, fontSize: 11,
-          fontWeight: 700, fontFamily: 'JetBrains Mono', cursor: 'pointer',
-          background: [S.GETTING_GPS, S.SAVING].includes(status)
-            ? 'rgba(255,255,255,.04)' : 'rgba(53,199,255,.1)',
-          border: '1px solid rgba(53,199,255,.25)',
-          color: [S.GETTING_GPS, S.SAVING].includes(status) ? 'var(--muted)' : 'var(--blue)',
-          letterSpacing: '.06em',
-        }}
-      >
-        {status === S.GETTING_GPS ? '📡 ACQUIRING GPS…' :
-         status === S.SAVING     ? '💾 SAVING…' :
-         status === S.SUCCESS    ? '🔄 REFRESH LOCATION' :
-                                   '📍 DETECT MY LOCATION'}
-      </button>
+      {/* Retry / Refresh + Clear buttons */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={() => captureAndSave()}
+          disabled={[S.GETTING_GPS, S.SAVING].includes(status)}
+          style={{
+            flex: 1, padding: '8px', borderRadius: 8, fontSize: 11,
+            fontWeight: 700, fontFamily: 'JetBrains Mono', cursor: 'pointer',
+            background: [S.GETTING_GPS, S.SAVING].includes(status)
+              ? 'rgba(255,255,255,.04)' : 'rgba(53,199,255,.1)',
+            border: '1px solid rgba(53,199,255,.25)',
+            color: [S.GETTING_GPS, S.SAVING].includes(status) ? 'var(--muted)' : 'var(--blue)',
+            letterSpacing: '.06em',
+          }}
+        >
+          {status === S.GETTING_GPS ? '📡 ACQUIRING GPS…' :
+           status === S.SAVING     ? '💾 SAVING…' :
+           status === S.SUCCESS    ? '🔄 REFRESH LOCATION' :
+                                     '📍 DETECT MY LOCATION'}
+        </button>
+        {status === S.SUCCESS && (
+          <button
+            onClick={() => {
+              try { localStorage.removeItem('aedirs_team_gps'); } catch (_) {}
+              clearGPSCache(); // also bust the module-level 5-min GPS cache
+              setStatus(S.IDLE);
+              setCoords(null);
+              setAddress('');
+              captureAndSave(team);
+            }}
+            style={{
+              padding: '8px 12px', borderRadius: 8, fontSize: 11,
+              fontWeight: 700, fontFamily: 'JetBrains Mono', cursor: 'pointer',
+              background: 'rgba(255,45,45,.1)', border: '1px solid rgba(255,45,45,.25)',
+              color: '#ff8a95', letterSpacing: '.06em', whiteSpace: 'nowrap',
+            }}
+          >
+            🗑️ RESET
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -32,9 +32,9 @@ function makePinIcon(L, color) {
 
 // ── Team avatar circle icon ────────────────────────────────────────────────────
 function makeTeamIcon(L, team) {
-  const color = teamColor(team.status);
+  const color   = teamColor(team.status);
   const initial = team.name.charAt(0);
-  const anim = team.status === 'Available' ? 'breathe-green' : team.status === 'On Route' ? 'breathe-orange' : 'breathe-red';
+  const anim    = team.status === 'Available' ? 'breathe-green' : team.status === 'On Route' ? 'breathe-orange' : 'breathe-red';
   return L.divIcon({
     className: '',
     html: `<div style="width:34px;height:34px;background:${color};border:2px solid rgba(255,255,255,.75);border-radius:50%;
@@ -72,16 +72,16 @@ export default function LiveTrackingMap({
   height = 420,
   userRole = 'authority',
   assignedTeam = null,   // citizen: team name string
-  incidentId = null,   // citizen: their incident id
-  myBaseTeam = null,   // rescue: the logged-in team object with { lat, lng, name, ... }
+  incidentId   = null,   // citizen: their incident id
+  myBaseTeam   = null,   // rescue: the logged-in team object with { lat, lng, name, ... }
 }) {
-  const mapRef = useRef(null);
-  const mapInst = useRef(null);
+  const mapRef     = useRef(null);
+  const mapInst    = useRef(null);
   const markersRef = useRef({});
-  const linesRef = useRef([]);
-  const baseRef = useRef(null);
+  const linesRef   = useRef([]);
+  const baseRef    = useRef(null);
 
-  const [teams, setTeams] = useState([]);
+  const [teams,     setTeams]     = useState([]);
   const [incidents, setIncidents] = useState([]);
 
   // ── Load initial data ──────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ export default function LiveTrackingMap({
       const [t, i] = await Promise.all([db.getTeams(), db.getIncidents()]);
       setTeams(t);
       setIncidents(i);
-    } catch { }
+    } catch {}
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -103,7 +103,7 @@ export default function LiveTrackingMap({
         setTeams(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, async () => {
-        try { setIncidents(await db.getIncidents()); } catch { }
+        try { setIncidents(await db.getIncidents()); } catch {}
       })
       .subscribe();
     return () => supabase.removeChannel(ch);
@@ -125,30 +125,30 @@ export default function LiveTrackingMap({
 
   // ── Render markers & route lines ───────────────────────────────────────────
   useEffect(() => {
-    const L = window.L;
+    const L   = window.L;
     const map = mapInst.current;
     if (!L || !map) return;
 
     // Clear old markers
-    Object.values(markersRef.current).forEach(m => { try { map.removeLayer(m); } catch { } });
+    Object.values(markersRef.current).forEach(m => { try { map.removeLayer(m); } catch {} });
     markersRef.current = {};
 
     // Clear old route lines
-    linesRef.current.forEach(l => { try { map.removeLayer(l); } catch { } });
+    linesRef.current.forEach(l => { try { map.removeLayer(l); } catch {} });
     linesRef.current = [];
 
     // Remove old base pin
-    if (baseRef.current) { try { map.removeLayer(baseRef.current); } catch { } baseRef.current = null; }
+    if (baseRef.current) { try { map.removeLayer(baseRef.current); } catch {} baseRef.current = null; }
 
     const activeIncidents = incidents.filter(i => i.status !== 'Resolved');
-    const allPoints = [];
+    const allPoints       = [];
 
     // ── Incident markers ──────────────────────────────────────────────────
     activeIncidents.forEach(inc => {
       if (!inc.lat || !inc.lng) return;
       if (userRole === 'citizen' && incidentId && inc.id !== incidentId) return;
 
-      const color = P_COLORS[inc.priority] || '#94A3B8';
+      const color  = P_COLORS[inc.priority] || '#94A3B8';
       const distTxt = (myBaseTeam?.lat && inc.lat)
         ? `<br/>📍 ${haversine(myBaseTeam.lat, myBaseTeam.lng, inc.lat, inc.lng).toFixed(1)} km · ~${calculateETA(haversine(myBaseTeam.lat, myBaseTeam.lng, inc.lat, inc.lng))} min ETA`
         : '';
@@ -217,7 +217,7 @@ export default function LiveTrackingMap({
 
     // ── Fit map to show all markers ─────────────────────────────────────────
     if (allPoints.length > 1) {
-      try { map.fitBounds(allPoints, { padding: [50, 50] }); } catch { }
+      try { map.fitBounds(allPoints, { padding: [50, 50] }); } catch {}
     } else if (allPoints.length === 1) {
       map.setView(allPoints[0], 14);
     }
@@ -230,10 +230,10 @@ export default function LiveTrackingMap({
       {/* Status bar */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         {[
-          { label: 'LIVE TRACKING', val: `${teams.length} TEAMS`, color: 'var(--blue)' },
-          { label: 'DEPLOYED', val: activePx, color: 'var(--orange)' },
-          { label: 'AVAILABLE', val: teams.filter(t => t.status === 'Available').length, color: 'var(--safe)' },
-          { label: 'ACTIVE INC.', val: incidents.filter(i => i.status !== 'Resolved').length, color: 'var(--critical)' },
+          { label: 'LIVE TRACKING', val: `${teams.length} TEAMS`, color: 'var(--blue)'     },
+          { label: 'DEPLOYED',      val: activePx,                color: 'var(--orange)'   },
+          { label: 'AVAILABLE',     val: teams.filter(t => t.status === 'Available').length, color: 'var(--safe)'    },
+          { label: 'ACTIVE INC.',   val: incidents.filter(i => i.status !== 'Resolved').length, color: 'var(--critical)' },
         ].map(s => (
           <div key={s.label} style={{
             background: 'rgba(23,33,58,.6)', border: '1px solid var(--border)',

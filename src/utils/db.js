@@ -293,6 +293,15 @@ export const db = {
     return true;
   },
 
+  async updateTeamName(teamId, name) {
+    const { error } = await supabase
+      .from('rescue_teams')
+      .update({ name })
+      .eq('id', teamId);
+    if (error) throw new Error(error.message);
+    return true;
+  },
+
   // Find a rescue team whose name matches the logged-in user's profile name
   async getTeamByName(name) {
     const { data, error } = await supabase

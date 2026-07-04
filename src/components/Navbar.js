@@ -162,7 +162,7 @@ function NotifBell() {
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 10px)', right: 0,
-          width: 360, maxHeight: 480,
+          width: 380, maxHeight: 600,
           background: 'linear-gradient(160deg,rgba(16,25,46,.99),rgba(10,16,32,.98))',
           border: '1px solid rgba(53,199,255,.2)',
           borderRadius: 14, overflow: 'hidden',

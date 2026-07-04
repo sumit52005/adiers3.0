@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../utils/db';
 import { classifyIncident, assignPriority, dispatchTeam } from '../../utils/aiEngine';
@@ -14,16 +14,19 @@ import WeatherHeatmap from '../../components/maps/WeatherHeatmap';
 import LiveTrackingMap from '../../components/maps/LiveTrackingMap';
 import EmergencyGuidelines from '../../components/EmergencyGuidelines';
 import { supabase, isSupabaseReady } from '../../utils/supabase';
+import GPSPickerMap from '../../components/maps/GPSPickerMap';
+import { getAccurateCoords, reverseGeocode, clearGPSCache } from '../../utils/gps';
+import { validateIncidentMedia } from '../../utils/mediaValidation';
 
 const SIDEBAR_ITEMS = [
-  { key: 'overview',   icon: '🏠', label: 'Dashboard' },
-  { key: 'report',     icon: '📋', label: 'Report Emergency' },
-  { key: 'myreports',  icon: '📁', label: 'My Reports' },
-  { key: 'tracking',   icon: '📍', label: 'Live Tracking' },
-  { key: 'disaster',   icon: '🗺️', label: 'Disaster Map' },
-  { key: 'weather',    icon: '⛈️', label: 'Weather Map' },
+  { key: 'overview', icon: '🏠', label: 'Dashboard' },
+  { key: 'report', icon: '📋', label: 'Report Emergency' },
+  { key: 'myreports', icon: '📁', label: 'My Reports' },
+  { key: 'tracking', icon: '📍', label: 'Live Tracking' },
+  { key: 'disaster', icon: '🗺️', label: 'Disaster Map' },
+  { key: 'weather', icon: '⛈️', label: 'Weather Map' },
   { key: 'guidelines', icon: '🛡️', label: 'Safety Guidelines' },
-  { key: 'contacts',   icon: '📞', label: 'Emergency Contacts' },
+  { key: 'contacts', icon: '📞', label: 'Emergency Contacts' },
 ];
 
 function TypeWriter({ text, speed = 28 }) {
@@ -38,16 +41,16 @@ function TypeWriter({ text, speed = 28 }) {
 
 // ── Overview ─────────────────────────────────────────────────────────────────
 function Overview({ user, setTab }) {
-  const [reports, setReports]   = useState([]);
-  const [notifs, setNotifs]     = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const [reports, setReports] = useState([]);
+  const [notifs, setNotifs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     db.getIncidents({ myOnly: true, userId: user.id })
       .then(data => { setReports(data); setLoading(false); })
       .catch(() => setLoading(false));
     // Load real notifications
-    db.getNotifications(user.id).then(setNotifs).catch(() => {});
+    db.getNotifications(user.id).then(setNotifs).catch(() => { });
   }, [user.id]);
 
   // Realtime: listen for new notifications for this citizen
@@ -80,26 +83,26 @@ function Overview({ user, setTab }) {
     return () => supabase.removeChannel(ch);
   }, [user.id]);
 
-  const active   = reports.filter(i => i.status !== 'Resolved').length;
+  const active = reports.filter(i => i.status !== 'Resolved').length;
   const resolved = reports.filter(i => i.status === 'Resolved').length;
-  const unread   = notifs.filter(n => !n.is_read).length;
+  const unread = notifs.filter(n => !n.is_read).length;
 
   return (
     <div>
       <EmergencyStrip />
       <div className="grid grid-cols-4 gap-4 mb-5">
-        <KpiCard label="My Reports"    value={loading ? '…' : reports.length} color="var(--blue)"   icon="📋" />
-        <KpiCard label="Active"        value={loading ? '…' : active}         color="var(--orange)" icon="⚡" />
-        <KpiCard label="Resolved"      value={loading ? '…' : resolved}       color="var(--green)"  icon="✅" />
-        <KpiCard label="Notifications" value={unread || notifs.length}        color="var(--red)"    icon="🔔" />
+        <KpiCard label="My Reports" value={loading ? '…' : reports.length} color="var(--blue)" icon="📋" />
+        <KpiCard label="Active" value={loading ? '…' : active} color="var(--orange)" icon="⚡" />
+        <KpiCard label="Resolved" value={loading ? '…' : resolved} color="var(--green)" icon="✅" />
+        <KpiCard label="Notifications" value={unread || notifs.length} color="var(--red)" icon="🔔" />
       </div>
 
       {/* Quick nav cards */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
           { tab: 'tracking', icon: '📍', label: 'Live Tracking', desc: 'Track your rescue team in real-time', color: '#00E676' },
-          { tab: 'disaster', icon: '🗺️', label: 'Disaster Map',  desc: 'View all active incidents near you',  color: '#FF6B1A' },
-          { tab: 'weather',  icon: '⛈️', label: 'Weather Map',   desc: 'Live weather conditions & alerts',    color: '#35c7ff' },
+          { tab: 'disaster', icon: '🗺️', label: 'Disaster Map', desc: 'View all active incidents near you', color: '#FF6B1A' },
+          { tab: 'weather', icon: '⛈️', label: 'Weather Map', desc: 'Live weather conditions & alerts', color: '#35c7ff' },
         ].map(c => (
           <button key={c.tab} onClick={() => setTab(c.tab)}
             style={{ background: `${c.color}10`, border: `1px solid ${c.color}30`, borderRadius: 10, padding: '12px', textAlign: 'left', color: 'var(--text)', cursor: 'pointer', transition: 'all .2s' }}
@@ -160,12 +163,15 @@ function Overview({ user, setTab }) {
 
 // ── Report Form ───────────────────────────────────────────────────────────────
 function ReportForm({ user, onSuccess }) {
-  const [form, setForm]         = useState({ title: '', desc: '', category: '', location: '', lat: 18.5204, lng: 73.8567 });
-  const [ai, setAi]             = useState(null);
+  const [form, setForm] = useState({ title: '', desc: '', category: '', location: '', lat: 18.5204, lng: 73.8567 });
+  const [ai, setAi] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [teams, setTeams]       = useState([]);
+  const [teams, setTeams] = useState([]);
   const [loadingGPS, setLoadingGPS] = useState(false);
   const [isLocationUserEdited, setIsLocationUserEdited] = useState(false);
+  const [mediaFiles, setMediaFiles] = useState([]);
+  const [mediaValidation, setMediaValidation] = useState([]);
+  const [validating, setValidating] = useState(false);
 
   useEffect(() => {
     db.getTeams().then(setTeams).catch(console.error);
@@ -183,67 +189,50 @@ function ReportForm({ user, onSuccess }) {
     }
   };
 
-  const detectGPS = useCallback((isAuto = false) => {
-    if (!navigator.geolocation) {
-      if (!isAuto) notify('Geolocation is not supported by your browser.', 'warning');
-      return;
-    }
-    if (isAuto && isLocationUserEdited) return;
-
-    setLoadingGPS(true);
-    if (!isAuto) notify('Detecting GPS location...', 'info');
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude } = position.coords;
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, {
-            headers: { 'Accept-Language': 'en' }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const address = data.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-            setForm(f => {
-              const nextLocation = isLocationUserEdited ? f.location : address;
-              const nextForm = { ...f, location: nextLocation, lat: latitude, lng: longitude };
-              updateAiDispatch(nextForm, teams);
-              return nextForm;
-            });
-            notify('Location detected successfully!', 'success');
-          } else {
-            throw new Error();
-          }
-        } catch {
-          setForm(f => {
-            const nextLocation = isLocationUserEdited ? f.location : `Detected Location (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
-            const nextForm = { ...f, location: nextLocation, lat: latitude, lng: longitude };
-            updateAiDispatch(nextForm, teams);
-            return nextForm;
-          });
-          notify('GPS coordinates set.', 'info');
-        } finally {
-          setLoadingGPS(false);
-        }
-      },
-      (error) => {
-        setLoadingGPS(false);
-        if (!isAuto) {
-          let msg = 'Failed to retrieve GPS location.';
-          if (error.code === error.PERMISSION_DENIED) {
-            msg = 'GPS permission denied. Please allow location access or type manually.';
-          }
-          notify(msg, 'warning');
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  }, [isLocationUserEdited, teams]);
+  // ── GPS auto-detect: runs ONCE on mount, never again ────────────────────────
+  // Using a ref flag so re-renders, tab switches, or teams re-fetches
+  // can NEVER trigger a second GPS call that would overwrite the user's location.
+  const gpsInitialized = useRef(false);
 
   useEffect(() => {
-    if (teams.length > 0) {
-      detectGPS(true);
+    if (gpsInitialized.current) return;
+    gpsInitialized.current = true;
+
+    (async () => {
+      setLoadingGPS(true);
+      const coords = await getAccurateCoords();
+      const geo = await reverseGeocode(coords.lat, coords.lng);
+      // Only fill in location if the user hasn't typed anything yet
+      setForm(f => {
+        if (f.location && f.location.trim() !== '') return f;
+        return { ...f, location: geo.address, lat: coords.lat, lng: coords.lng };
+      });
+      setLoadingGPS(false);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Manual GPS detect (button press) ─────────────────────────────────────
+  const detectGPS = useCallback(async () => {
+    setLoadingGPS(true);
+    clearGPSCache(); // force a fresh fix when user explicitly presses the button
+    notify('Detecting GPS location...', 'info');
+    const coords = await getAccurateCoords();
+    const geo = await reverseGeocode(coords.lat, coords.lng);
+    setForm(f => {
+      const updated = { ...f, location: geo.address, lat: coords.lat, lng: coords.lng };
+      updateAiDispatch(updated, teams);
+      return updated;
+    });
+    if (coords.method === 'gps') {
+      notify('Location detected successfully!', 'success');
+    } else if (coords.method === 'ip') {
+      notify('Network position resolved (IP fallback). Use the map to pinpoint your exact location.', 'info');
+    } else {
+      notify('Could not retrieve GPS. Defaulted to city centre — please pinpoint on the map.', 'warning');
     }
-  }, [teams, detectGPS]);
+    setIsLocationUserEdited(false); // reset so map can still update address
+    setLoadingGPS(false);
+  }, [teams]);
 
   const setF = (k, v) => {
     if (k === 'location') {
@@ -260,6 +249,16 @@ function ReportForm({ user, onSuccess }) {
 
   const handleSubmit = async () => {
     if (!form.title || !form.desc) { notify('Please fill title and description.', 'error'); return; }
+    // Only block submission when Vision API (accurate) explicitly marks a file as invalid
+    const apiKey = process.env.REACT_APP_VISION_API_KEY;
+    const hasValidKey = apiKey && apiKey !== 'YOUR_VISION_API_KEY' && apiKey.length > 10;
+    if (hasValidKey) {
+      const hasInvalid = mediaValidation.some(r => r.status === 'invalid');
+      if (hasInvalid) {
+        notify('One or more photos appear unrelated to an emergency. Please attach a relevant image.', 'error');
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const { incident, category, priority, team, eta } = await db.createIncident({
@@ -272,6 +271,22 @@ function ReportForm({ user, onSuccess }) {
       onSuccess();
     } catch (e) { notify(e.message, 'error'); }
     setSubmitting(false);
+  };
+
+  const handleMediaChange = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    setMediaFiles(files);
+    setMediaValidation([]);
+    setValidating(true);
+    notify('🔍 Validating media for emergency relevance…', 'info');
+    const results = await validateIncidentMedia(files);
+    setMediaValidation(results);
+    setValidating(false);
+    const genuine = results.filter(r => r.status === 'genuine').length;
+    const invalid = results.filter(r => r.status === 'invalid').length;
+    if (genuine > 0) notify(`✅ ${genuine} file(s) confirmed as emergency-related`, 'success');
+    if (invalid > 0) notify(`❌ ${invalid} file(s) appear unrelated to an emergency`, 'warning');
   };
 
   const INPUT = { background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)' };
@@ -348,13 +363,63 @@ function ReportForm({ user, onSuccess }) {
           </div>
         </div>
       </div>
+
+      <div className="mb-4">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <label className="eyebrow block mb-0">Interactive GPS Pinpoint Map</label>
+          <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'JetBrains Mono' }}>
+            ACCURACY: HIGH-ACCURACY SIGNAL
+          </span>
+        </div>
+        <GPSPickerMap
+          lat={form.lat}
+          lng={form.lng}
+          onChange={(newLat, newLng, newAddr) => {
+            setForm(f => {
+              const updated = { ...f, lat: newLat, lng: newLng, location: newAddr };
+              updateAiDispatch(updated, teams);
+              return updated;
+            });
+          }}
+        />
+      </div>
       <div className="mb-5">
         <label className="eyebrow block mb-2">Attach Photos / Videos (optional)</label>
         <label className="flex items-center justify-center gap-2 w-full rounded-xl py-4 text-sm cursor-pointer"
           style={{ ...INPUT, border: '1px dashed var(--border)', color: 'var(--muted)' }}>
-          📎 Click to attach photos or videos
-          <input type="file" className="hidden" multiple accept="image/*,video/*" />
+          {validating ? '🔍 Validating media…' : mediaFiles.length > 0 ? `📎 ${mediaFiles.length} file(s) selected` : '📎 Click to attach photos or videos'}
+          <input type="file" className="hidden" multiple accept="image/*,video/*" onChange={handleMediaChange} />
         </label>
+        {/* ML Validation Results */}
+        {mediaValidation.length > 0 && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {mediaValidation.map((result, idx) => {
+              const colors = {
+                genuine: { bg: 'rgba(37,230,163,.1)', border: 'rgba(37,230,163,.3)', text: '#25e6a3' },
+                unverified: { bg: 'rgba(255,107,26,.1)', border: 'rgba(255,107,26,.3)', text: '#FF6B1A' },
+                invalid: { bg: 'rgba(255,45,45,.1)', border: 'rgba(255,45,45,.3)', text: '#ff8a95' },
+              };
+              const c = colors[result.status] || colors.unverified;
+              return (
+                <div key={idx} style={{
+                  background: c.bg, border: `1px solid ${c.border}`,
+                  borderRadius: 8, padding: '8px 12px',
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                }}>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>
+                    {result.status === 'genuine' ? '✅' : result.status === 'invalid' ? '❌' : '⚠️'}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, fontFamily: 'JetBrains Mono', color: c.text, marginBottom: 2 }}>
+                      {result.status.toUpperCase()} · {result.fileName}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{result.message}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       {ai && (
         <div className="mb-5 rounded-xl px-5 py-4" style={{ background: 'rgba(170,0,255,.07)', border: '1px solid rgba(170,0,255,.3)' }}>
@@ -457,7 +522,7 @@ export default function CitizenDashboard() {
         .then(data => {
           const active = data.find(i => i.status !== 'Resolved' && i.assignedTeam);
           setMyActiveIncident(active || null);
-        }).catch(() => {});
+        }).catch(() => { });
     }
   }, [user?.id]);
 
@@ -466,10 +531,10 @@ export default function CitizenDashboard() {
       <Sidebar items={SIDEBAR_ITEMS} activeTab={tab} onTabChange={setTab}
         header={{ label: 'Citizen Portal', name: user?.name }} />
       <main className="flex-1 overflow-y-auto p-6">
-        {tab === 'overview'   && <Overview user={user} setTab={setTab} />}
-        {tab === 'report'     && <ReportForm user={user} onSuccess={() => setTab('overview')} />}
-        {tab === 'myreports'  && <MyReports user={user} />}
-        {tab === 'tracking'   && (
+        {tab === 'overview' && <Overview user={user} setTab={setTab} />}
+        {tab === 'report' && <ReportForm user={user} onSuccess={() => setTab('overview')} />}
+        {tab === 'myreports' && <MyReports user={user} />}
+        {tab === 'tracking' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
               <h2 style={{ fontFamily: 'Rajdhani', fontSize: 20, fontWeight: 700 }}>📍 Live Team Tracking</h2>
@@ -494,20 +559,20 @@ export default function CitizenDashboard() {
             )}
           </div>
         )}
-        {tab === 'disaster'   && (
+        {tab === 'disaster' && (
           <div>
             <h2 style={{ fontFamily: 'Rajdhani', fontSize: 20, fontWeight: 700, marginBottom: 14 }}>🗺️ Disaster Heatmap — Pune Region</h2>
             <DisasterHeatmap height={520} readOnly={true} />
           </div>
         )}
-        {tab === 'weather'    && (
+        {tab === 'weather' && (
           <div>
             <h2 style={{ fontFamily: 'Rajdhani', fontSize: 20, fontWeight: 700, marginBottom: 14 }}>⛈️ Live Weather Map — Pune Region</h2>
             <WeatherHeatmap height={440} showPanel={true} />
           </div>
         )}
         {tab === 'guidelines' && <EmergencyGuidelines />}
-        {tab === 'contacts'   && <Contacts />}
+        {tab === 'contacts' && <Contacts />}
       </main>
     </div>
   );

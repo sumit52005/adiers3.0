@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { notify } from '../Notification';
+import { getAccurateCoords } from '../../utils/gps';
 
 const CITIES = [
   { name: 'Delhi', lat: 28.6139, lng: 77.2090 },
@@ -279,42 +280,36 @@ export default function WeatherHeatmap({ height = 440, showPanel = true }) {
         const defaultCity = formatted.find(c => c.name === 'Pune') || formatted[0];
         loadForecastDetails(defaultCity);
 
-        // Geolocation lookup on mount
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              const { latitude, longitude } = pos.coords;
-              setUserLoc({ lat: latitude, lng: longitude });
-
-              if (mapInst.current) {
-                mapInst.current.setView([latitude, longitude], 10);
-              }
-
-              // Fetch local weather
-              fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric`)
-                .then(res => res.json())
-                .then(data => {
-                  const id = data.weather[0]?.id || 800;
-                  const code = mapOWMToWMO(id);
-                  const userCityInfo = {
-                    name: data.name || 'Your Location',
-                    lat: latitude,
-                    lng: longitude,
-                    temp: data.main?.temp || 25,
-                    feels: data.main?.feels_like || 25,
-                    humidity: data.main?.humidity || 65,
-                    wind: Math.round((data.wind?.speed || 2) * 3.6),
-                    precip: data.rain ? (data.rain['1h'] || 0) : 0,
-                    code: code,
-                    label: WMO_CODES[code] || data.weather[0]?.description || 'Clear sky'
-                  };
-                  loadForecastDetails(userCityInfo);
-                })
-                .catch(() => { });
-            },
-            () => { }
-          );
-        }
+        // Geolocate user on mount — uses shared gps.js utility
+        // (handles HTTPS guard, 5-min cache, and IP fallback)
+        getAccurateCoords().then(async coords => {
+          if (coords.method === 'default') return; // no location available
+          setUserLoc({ lat: coords.lat, lng: coords.lng });
+          if (mapInst.current) {
+            mapInst.current.setView([coords.lat, coords.lng], 10);
+          }
+          // Fetch local weather for the detected position
+          fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${coords.lat}&lon=${coords.lng}&appid=${apiKey}&units=metric`)
+            .then(res => res.json())
+            .then(data => {
+              const id = data.weather[0]?.id || 800;
+              const code = mapOWMToWMO(id);
+              const userCityInfo = {
+                name: data.name || 'Your Location',
+                lat: coords.lat,
+                lng: coords.lng,
+                temp: data.main?.temp || 25,
+                feels: data.main?.feels_like || 25,
+                humidity: data.main?.humidity || 65,
+                wind: Math.round((data.wind?.speed || 2) * 3.6),
+                precip: data.rain ? (data.rain['1h'] || 0) : 0,
+                code,
+                label: WMO_CODES[code] || data.weather[0]?.description || 'Clear sky',
+              };
+              loadForecastDetails(userCityInfo);
+            })
+            .catch(() => { });
+        });
       })
       .catch((err) => {
         console.error("Error loading weather data:", err);
@@ -331,17 +326,17 @@ export default function WeatherHeatmap({ height = 440, showPanel = true }) {
       const map = L.map(mapRef.current, { zoomControl: true, attributionControl: false })
         .setView(userLoc ? [userLoc.lat, userLoc.lng] : [19.75, 75.71], userLoc ? 10 : 6);
 
-      const googleRoadmap = L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
-        attribution: '© Google Maps', maxZoom: 20
+      const cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap © CARTO', maxZoom: 18, subdomains: 'abcd',
       });
-      const googleHybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-        attribution: '© Google Maps', maxZoom: 20
+      const cartoDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap © CARTO', maxZoom: 18, subdomains: 'abcd',
       });
-      const googleTerrain = L.tileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
-        attribution: '© Google Maps', maxZoom: 20
+      const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors', maxZoom: 18,
       });
 
-      googleRoadmap.addTo(map);
+      cartoDark.addTo(map);
       mapInst.current = map;
 
       // Fetch RainViewer radar overlays
@@ -357,9 +352,9 @@ export default function WeatherHeatmap({ height = 440, showPanel = true }) {
             radarLayer.addTo(map);
 
             const baseMaps = {
-              "🗺️ Google Roadmap": googleRoadmap,
-              "🛰️ Google Hybrid": googleHybrid,
-              "⛰️ Google Terrain": googleTerrain
+              "🌙 Dark (CartoDB)": cartoDark,
+              "☀️ Light (CartoDB)": cartoLight,
+              "🗺️ OpenStreetMap": osm
             };
 
             const overlayMaps = {
@@ -569,73 +564,55 @@ export default function WeatherHeatmap({ height = 440, showPanel = true }) {
       });
   };
 
-  // Trigger GPS Geolocation Lookup
-  const triggerGPSLookup = () => {
+  // Trigger GPS Geolocation Lookup (user button press)
+  const triggerGPSLookup = async () => {
     setForecastLoading(true);
-    if (!navigator.geolocation) {
-      notify("Geolocation is not supported by your browser", "warning");
-      setForecastLoading(false);
-      return;
+
+    const coords = await getAccurateCoords();
+    if (coords.method === 'default') {
+      notify('GPS unavailable — defaulted to Pune city centre.', 'warning');
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        setUserLoc({ lat: latitude, lng: longitude });
+    setUserLoc({ lat: coords.lat, lng: coords.lng });
 
-        const envKey = process.env.REACT_APP_OPENWEATHER_API_KEY;
-        const apiKey = (envKey && envKey !== 'YOUR_OPENWEATHER_API_KEY') ? envKey : '983ab426945e7c591ba4c3c4a41169b9';
+    const envKey = process.env.REACT_APP_OPENWEATHER_API_KEY;
+    const apiKey = (envKey && envKey !== 'YOUR_OPENWEATHER_API_KEY') ? envKey : '983ab426945e7c591ba4c3c4a41169b9';
 
-        // Reverse geocode user location name via Nominatim
-        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`)
-          .then(res => res.json())
-          .then(geoData => {
-            const locName = geoData.address.suburb || geoData.address.village || geoData.address.town || geoData.address.city || 'Your Location';
+    // Reverse geocode to get locality name
+    try {
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lng}&format=json`);
+      const geoData = await geoRes.json();
+      const locName = geoData.address?.suburb || geoData.address?.village || geoData.address?.town || geoData.address?.city || 'Your Location';
 
-            // Return weather metrics promise chain
-            return fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric`)
-              .then(res => {
-                if (!res.ok) throw new Error();
-                return res.json();
-              })
-              .then(wx => {
-                const id = wx.weather[0]?.id || 800;
-                const code = mapOWMToWMO(id);
-                const userCityInfo = {
-                  name: locName,
-                  lat: latitude,
-                  lng: longitude,
-                  temp: wx.main?.temp || 25,
-                  feels: wx.main?.feels_like || 25,
-                  humidity: wx.main?.humidity || 65,
-                  wind: Math.round((wx.wind?.speed || 2) * 3.6),
-                  precip: wx.rain ? (wx.rain['1h'] || 0) : 0,
-                  code: code,
-                  label: WMO_CODES[code] || wx.weather[0]?.description || 'Clear sky'
-                };
+      // Fetch weather for detected position
+      const wxRes = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${coords.lat}&lon=${coords.lng}&appid=${apiKey}&units=metric`);
+      if (!wxRes.ok) throw new Error();
+      const wx = await wxRes.json();
+      const id = wx.weather[0]?.id || 800;
+      const code = mapOWMToWMO(id);
 
-                if (mapInst.current) {
-                  mapInst.current.setView([latitude, longitude], 10);
-                }
+      const userCityInfo = {
+        name: locName,
+        lat: coords.lat,
+        lng: coords.lng,
+        temp: wx.main?.temp || 25,
+        feels: wx.main?.feels_like || 25,
+        humidity: wx.main?.humidity || 65,
+        wind: Math.round((wx.wind?.speed || 2) * 3.6),
+        precip: wx.rain ? (wx.rain['1h'] || 0) : 0,
+        code,
+        label: WMO_CODES[code] || wx.weather[0]?.description || 'Clear sky',
+      };
 
-                loadForecastDetails(userCityInfo);
-                notify(`GPS located: ${locName}`, 'success');
-              });
-          })
-          .catch(() => {
-            const fallbackCity = { name: 'Your Location', lat: latitude, lng: longitude, code: 0, label: 'Clear sky' };
-            loadForecastDetails(fallbackCity);
-            if (mapInst.current) {
-              mapInst.current.setView([latitude, longitude], 10);
-            }
-          });
-      },
-      (err) => {
-        console.error(err);
-        notify("GPS location request denied or failed.", "warning");
-        setForecastLoading(false);
-      }
-    );
+      if (mapInst.current) mapInst.current.setView([coords.lat, coords.lng], 10);
+      loadForecastDetails(userCityInfo);
+      notify(`GPS located: ${locName}`, 'success');
+    } catch (_) {
+      const fallback = { name: 'Your Location', lat: coords.lat, lng: coords.lng, code: 0, label: 'Clear sky' };
+      loadForecastDetails(fallback);
+      if (mapInst.current) mapInst.current.setView([coords.lat, coords.lng], 10);
+    }
+    setForecastLoading(false);
   };
 
   // Click an alert card to fly map to location

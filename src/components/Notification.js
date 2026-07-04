@@ -48,9 +48,17 @@ export function NotificationProvider({ userId, userRole }) {
   const [unread, setUnread]       = useState(0);
   const [permAsked, setPermAsked] = useState(false);
   const channelRef                = useRef(null);
+  // Deduplication: track recently shown notification keys to prevent duplicates
+  const recentKeys                = useRef(new Set());
 
   // ── Core push function ────────────────────────────────────────────────────
   const push = useCallback((msg, type = 'info', opts = {}) => {
+    // Deduplication: drop identical messages within a 10-second window
+    const dedupKey = type + '::' + msg.slice(0, 100);
+    if (recentKeys.current.has(dedupKey)) return;
+    recentKeys.current.add(dedupKey);
+    setTimeout(() => recentKeys.current.delete(dedupKey), 10000);
+
     const id = Date.now() + Math.random();
     const entry = { id, msg, type, link: opts.link, ts: new Date() };
 

@@ -4,14 +4,15 @@ import { useAuth } from '../../context/AuthContext';
 import { notify } from '../../components/Notification';
 import { Zap, Eye, EyeOff, Shield, Users, Building2 } from 'lucide-react';
 import Stepper, { Step } from '../../components/Stepper/Stepper';
+import { getAccurateCoords, reverseGeocode } from '../../utils/gps';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const redirectFor = role => role === 'rescue_team' ? '/rescue' : `/${role}`;
 
 const ROLE_OPTIONS = [
-  { key: 'citizen',     icon: Users,     label: 'Citizen',     desc: 'Report emergencies & track rescue' },
-  { key: 'rescue_team', icon: Shield,    label: 'Rescue Team', desc: 'Manage missions & respond to incidents' },
-  { key: 'authority',   icon: Building2, label: 'Authority',   desc: 'Full oversight, dispatch & analytics' },
+  { key: 'citizen', icon: Users, label: 'Citizen', desc: 'Report emergencies & track rescue' },
+  { key: 'rescue_team', icon: Shield, label: 'Rescue Team', desc: 'Manage missions & respond to incidents' },
+  { key: 'authority', icon: Building2, label: 'Authority', desc: 'Full oversight, dispatch & analytics' },
 ];
 
 const INPUT_STYLE = {
@@ -37,12 +38,12 @@ function Field({ label, type = 'text', value, onChange, placeholder, suffix }) {
 function SignInForm({ onSwitch }) {
   const navigate = useNavigate();
   const { login, logout } = useAuth();
-  const [role, setRole]         = useState('citizen');
-  const [email, setEmail]       = useState('');
+  const [role, setRole] = useState('citizen');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPw, setShowPw]     = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = async e => {
     e?.preventDefault();
@@ -121,56 +122,30 @@ function SignInForm({ onSwitch }) {
 // ── Sign-Up Steps ─────────────────────────────────────────────────────────────
 function SignUpStepper({ onSwitch }) {
   const { register } = useAuth();
-  const [role, setRole]         = useState('');
-  const [form, setForm]         = useState({ name: '', email: '', password: '', phone: '', location: '' });
-  const [showPw, setShowPw]     = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [role, setRole] = useState('');
+  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', location: '' });
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [loadingGPS, setLoadingGPS] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const detectGPS = () => {
-    if (!navigator.geolocation) {
-      notify('Geolocation is not supported by your browser.', 'warning');
-      return;
-    }
+  const detectGPS = async () => {
     setLoadingGPS(true);
     notify('Detecting location...', 'info');
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude } = position.coords;
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, {
-            headers: { 'Accept-Language': 'en' }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const addr = data.address;
-            const cityArea = addr ? (addr.city || addr.town || addr.suburb || addr.village || addr.city_district || addr.county || addr.state) : '';
-            const address = cityArea || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-            set('location', address);
-            notify('Location detected successfully!', 'success');
-          } else {
-            throw new Error();
-          }
-        } catch {
-          set('location', `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-          notify('Location set to coordinates.', 'info');
-        } finally {
-          setLoadingGPS(false);
-        }
-      },
-      (error) => {
-        setLoadingGPS(false);
-        let msg = 'Failed to retrieve GPS location.';
-        if (error.code === error.PERMISSION_DENIED) {
-          msg = 'GPS permission denied. Please allow location access or type manually.';
-        }
-        notify(msg, 'warning');
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+
+    const coords = await getAccurateCoords();
+    const res = await reverseGeocode(coords.lat, coords.lng);
+    set('location', res.address);
+    if (coords.method === 'gps') {
+      notify('Location detected successfully!', 'success');
+    } else if (coords.method === 'ip') {
+      notify('Network position resolved (IP fallback).', 'info');
+    } else {
+      notify('Could not retrieve location. Defaulted to city center.', 'warning');
+    }
+    setLoadingGPS(false);
   };
 
   const handleComplete = async () => {
@@ -365,9 +340,10 @@ export default function Login() {
 
           {/* Mode toggle */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: '16px 20px 0', background: 'rgba(23,33,58,.4)' }}>
-            {[['login','Sign In'], ['signup','Sign Up']].map(([m, l]) => (
+            {[['login', 'Sign In'], ['signup', 'Sign Up']].map(([m, l]) => (
               <button key={m} onClick={() => setMode(m)}
-                style={{ padding: '9px', borderRadius: 8, fontSize: 13, fontWeight: 600, transition: 'all .2s', border: 'none',
+                style={{
+                  padding: '9px', borderRadius: 8, fontSize: 13, fontWeight: 600, transition: 'all .2s', border: 'none',
                   background: mode === m ? 'rgba(82,39,255,.25)' : 'transparent',
                   color: mode === m ? '#c4b5fd' : 'var(--muted)',
                   borderBottom: mode === m ? '2px solid #5227FF' : '2px solid transparent',
