@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../utils/db';
 import { dispatchTeam, rankTeams } from '../../utils/aiEngine';
@@ -8,7 +8,6 @@ import KpiCard from '../../components/KpiCard';
 import TableCard, { Th, Td } from '../../components/TableCard';
 import { PriorityBadge, StatusBadge, CategoryBadge } from '../../components/Badge';
 import StatusFlow from '../../components/StatusFlow';
-import DisasterHeatmap from '../../components/maps/DisasterHeatmap';
 import WeatherHeatmap from '../../components/maps/WeatherHeatmap';
 import LiveTrackingMap from '../../components/maps/LiveTrackingMap';
 import { supabase, isSupabaseReady } from '../../utils/supabase';
@@ -33,7 +32,7 @@ function useData() {
   const [loading,   setLoading]   = useState(true);
   const [tick,      setTick]      = useState(0);
 
-  const refresh = () => setTick(t => t + 1);
+  const refresh = useCallback(() => setTick(t => t + 1), []);
 
   useEffect(() => {
     setLoading(true);
@@ -63,7 +62,7 @@ function useData() {
 
 // ── Overview ────────────────────────────────────────────────────────────────
 function Overview({ setTab }) {
-  const { incidents, teams, stats, loading, updateStatus } = useData();
+  const { incidents, teams, stats, loading } = useData();
   return (
     <div>
       <div className="grid grid-cols-4 gap-4 mb-5">
@@ -293,7 +292,7 @@ function Dispatch() {
   const [result, setResult] = useState(null);
   const active = incidents.filter(i=>i.status!=='Resolved');
 
-  useEffect(()=>{ if(active.length && !selInc) setSelInc(String(active[0]?.id||'')); },[active]);
+  useEffect(()=>{ if(active.length && !selInc) setSelInc(String(active[0]?.id||'')); },[active, selInc]);
 
   const runDispatch = async () => {
     const inc = incidents.find(i=>i.id===parseInt(selInc));
@@ -410,7 +409,6 @@ function Analytics() {
   const maxV = Math.max(...Object.values(byCat), 1);
   const catColors = { Flood:'#3B82F6', Fire:'#EF4444', 'Road Accident':'#F97316', 'Medical Emergency':'#22C55E', 'Building Collapse':'#A855F7', Unknown:'#94A3B8' };
   const respTimes = [14,9,16,8,12,11,10];
-  const maxR = Math.max(...respTimes);
   const resRate = stats.total ? Math.round(stats.resolved/stats.total*100) : 0;
   return (
     <div>

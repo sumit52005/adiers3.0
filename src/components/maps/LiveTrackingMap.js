@@ -17,18 +17,7 @@ function teamColor(status) {
   return status === 'Available' ? '#00E676' : status === 'On Route' ? '#FF6B1A' : '#FF2D2D';
 }
 
-// ── Standard circle pin with pulse rings ──────────────────────────────────────
-function makePinIcon(L, color) {
-  return L.divIcon({
-    className: '',
-    html: `<div style="position:relative;width:22px;height:22px">
-      <div style="position:absolute;inset:0;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,.6);z-index:2"></div>
-      <div style="position:absolute;inset:-7px;border-radius:50%;border:2px solid ${color};opacity:0;animation:ring-expand 2s ease-out infinite"></div>
-      <div style="position:absolute;inset:-13px;border-radius:50%;border:1.5px solid ${color};opacity:0;animation:ring-expand 2s ease-out .6s infinite"></div>
-    </div>`,
-    iconSize: [22, 22], iconAnchor: [11, 11],
-  });
-}
+
 
 // ── Team avatar circle icon ────────────────────────────────────────────────────
 function makeTeamIcon(L, team) {
