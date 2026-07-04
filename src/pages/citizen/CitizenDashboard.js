@@ -168,7 +168,6 @@ function ReportForm({ user, onSuccess }) {
   const [submitting, setSubmitting] = useState(false);
   const [teams, setTeams] = useState([]);
   const [loadingGPS, setLoadingGPS] = useState(false);
-  const [isLocationUserEdited, setIsLocationUserEdited] = useState(false);
   const [mediaFiles, setMediaFiles] = useState([]);
   const [mediaValidation, setMediaValidation] = useState([]);
   const [validating, setValidating] = useState(false);
@@ -230,14 +229,10 @@ function ReportForm({ user, onSuccess }) {
     } else {
       notify('Could not retrieve GPS. Defaulted to city centre — please pinpoint on the map.', 'warning');
     }
-    setIsLocationUserEdited(false); // reset so map can still update address
     setLoadingGPS(false);
   }, [teams]);
 
   const setF = (k, v) => {
-    if (k === 'location') {
-      setIsLocationUserEdited(true);
-    }
     setForm(f => {
       const updated = { ...f, [k]: v };
       if (k === 'title' || k === 'desc') {
